@@ -47,6 +47,16 @@ pub type Column<'a> = &'a dyn InputPin<Error = Infallible>;
 pub type Row<'a> = &'a mut dyn OutputPin<Error = Infallible>;
 pub type MatrixState = [[bool; 15]; 5];
 
+#[derive(PartialEq)]
+enum KeyboardMode {
+    Normal,
+    Saving,
+}
+
+const KEYBOARD_POLL_MS: u32 = 5;
+const KEYBOARD_POLL_MS_SAVING: u32 = 20;
+const IDLE_WAIT_SEC: u32 = 5;
+
 #[entry]
 fn main() -> ! {
     let mut dp = rp_pico::hal::pac::Peripherals::take().unwrap();
@@ -76,7 +86,7 @@ fn main() -> ! {
     let mut hid = HIDClass::new_with_settings(
         &bus_allocator,
         KeyboardReport::desc(),
-        5,
+        KEYBOARD_POLL_MS as u8,
         HidClassSettings {
             subclass: HidSubClass::NoSubClass,
             protocol: HidProtocol::Keyboard,
@@ -116,6 +126,8 @@ fn main() -> ! {
     let mut row3 = pins.gpio17.into_push_pull_output();
     let mut row4 = pins.gpio16.into_push_pull_output();
 
+    let mut led = pins.led.into_push_pull_output();
+
     let cols: &[Column] = &[
         &col0, &col1, &col2, &col3, &col4, &col5, &col6, &col7, &col8, &col9, &col10, &col11,
         &col12, &col13, &col14,
@@ -123,31 +135,81 @@ fn main() -> ! {
     let rows: &mut [Row] = &mut [&mut row0, &mut row1, &mut row2, &mut row3, &mut row4];
 
     let mut countdown = timer.count_down();
-    countdown.start(5.millis());
+    countdown.start(KEYBOARD_POLL_MS.millis());
+
+    let mut keyboard_mode = KeyboardMode::Normal;
+    let mut last_input_frame = 0;
+    let mut frame: u32 = 0;
 
     loop {
         usb_dev.poll(&mut [&mut hid]);
         if countdown.wait().is_ok() {
-            let mtx = scan_key_switch(cols, rows);
-            let report = build_report(mtx);
-            hid.push_input(&report).ok();
+            if last_input_frame == frame {
+                keyboard_mode = KeyboardMode::Saving;
+            }
+
+            if keyboard_mode == KeyboardMode::Normal {
+                let (mtx, empty) = scan_key_switch(cols, rows);
+                if empty {
+                    hid.push_input(&KeyboardReport {
+                        modifier: 0,
+                        reserved: 0,
+                        leds: 0,
+                        keycodes: [0, 0, 0, 0, 0, 0],
+                    })
+                    .ok();
+                } else {
+                    let report = build_report(mtx);
+                    hid.push_input(&report).ok();
+                    last_input_frame = frame;
+                }
+            } else if frame % (KEYBOARD_POLL_MS_SAVING / KEYBOARD_POLL_MS) == 0 {
+                let (mtx, empty) = scan_key_switch(cols, rows);
+                let report = build_report(mtx);
+                hid.push_input(&report).ok();
+                if empty {
+                    hid.push_input(&KeyboardReport {
+                        modifier: 0,
+                        reserved: 0,
+                        leds: 0,
+                        keycodes: [0, 0, 0, 0, 0, 0],
+                    })
+                    .ok();
+                } else {
+                    let report = build_report(mtx);
+                    hid.push_input(&report).ok();
+                    last_input_frame = frame;
+                    keyboard_mode = KeyboardMode::Normal;
+                }
+            }
+
+            frame = (frame + 1) % (1000 / KEYBOARD_POLL_MS * IDLE_WAIT_SEC);
         }
         hid.pull_raw_output(&mut [0; 64]).ok();
+        if keyboard_mode == KeyboardMode::Normal {
+            led.set_high().unwrap();
+        } else {
+            led.set_low().unwrap();
+        }
     }
 }
 
-fn scan_key_switch(cols: &[Column], rows: &mut [Row]) -> MatrixState {
+fn scan_key_switch(cols: &[Column], rows: &mut [Row]) -> (MatrixState, bool) {
+    let mut empty = true;
     let mut state: MatrixState = [[false; 15]; 5];
     for row in 0..rows.len() {
         rows[row].set_low().unwrap();
         asm::delay(10);
         for col in 0..cols.len() {
             state[row][col] = cols[col].is_low().unwrap();
+            if state[row][col] {
+                empty = false;
+            }
         }
         rows[row].set_high().unwrap();
         asm::delay(10);
     }
-    return state;
+    return (state, empty);
 }
 
 fn build_report(state: MatrixState) -> KeyboardReport {
