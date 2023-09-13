@@ -12,8 +12,9 @@ use embedded_hal::digital::v2::{InputPin, OutputPin};
 use fugit::ExtU32;
 use keycodes::{KeyCodes, ModifierMasks};
 use layout::{
-    FN_KEY_POS, KEY_LAYOUT, KEY_LAYOUT_WITH_FN, LEFT_ALT, LEFT_CTRL, LEFT_GUI, LEFT_SHIFT,
-    RIGHT_ALT, RIGHT_CTRL, RIGHT_GUI, RIGHT_SHIFT,
+    FN_KEY_POS, KEY_LAYOUT, KEY_LAYOUT_WITH_FN, LEFT_ALT, LEFT_BUTTON, LEFT_CTRL, LEFT_GUI,
+    LEFT_SHIFT, MODE_KEY_POS, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT, MOVE_UP, RIGHT_ALT, RIGHT_BUTTON,
+    RIGHT_CTRL, RIGHT_GUI, RIGHT_SHIFT,
 };
 use panic_probe as _;
 
@@ -23,7 +24,7 @@ use usb_device::{
     prelude::{UsbDeviceBuilder, UsbVidPid},
 };
 use usbd_hid::{
-    descriptor::{KeyboardReport, SerializedDescriptor},
+    descriptor::{KeyboardReport, MouseReport, SerializedDescriptor},
     hid_class::{
         HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
     },
@@ -83,7 +84,7 @@ fn main() -> ! {
     );
     let bus_allocator = UsbBusAllocator::new(bus);
 
-    let mut hid = HIDClass::new_with_settings(
+    let mut kb_hid = HIDClass::new_with_settings(
         &bus_allocator,
         KeyboardReport::desc(),
         KEYBOARD_POLL_MS as u8,
@@ -95,10 +96,22 @@ fn main() -> ! {
         },
     );
 
+    let mut ms_hid = HIDClass::new_with_settings(
+        &bus_allocator,
+        MouseReport::desc(),
+        10,
+        HidClassSettings {
+            subclass: HidSubClass::NoSubClass,
+            protocol: HidProtocol::Mouse,
+            config: ProtocolModeConfig::ForceReport,
+            locale: HidCountryCode::NotSupported,
+        },
+    );
+
     let mut usb_dev = UsbDeviceBuilder::new(&bus_allocator, UsbVidPid(0x2718, 0x2818))
         .manufacturer("Oya-Tomo")
         .product("Wavier-Keys")
-        .serial_number("2023.9.1.001")
+        .serial_number("2023.9.13.18.57")
         .build();
 
     let sio = rp_pico::hal::Sio::new(dp.SIO);
@@ -142,7 +155,7 @@ fn main() -> ! {
     let mut frame: u32 = 0;
 
     loop {
-        usb_dev.poll(&mut [&mut hid]);
+        usb_dev.poll(&mut [&mut kb_hid, &mut ms_hid]);
         if countdown.wait().is_ok() {
             if last_input_frame == frame {
                 keyboard_mode = KeyboardMode::Saving;
@@ -151,33 +164,61 @@ fn main() -> ! {
             if keyboard_mode == KeyboardMode::Normal {
                 let (mtx, empty) = scan_key_switch(cols, rows);
                 if empty {
-                    hid.push_input(&KeyboardReport {
-                        modifier: 0,
-                        reserved: 0,
-                        leds: 0,
-                        keycodes: [0, 0, 0, 0, 0, 0],
-                    })
-                    .ok();
+                    kb_hid
+                        .push_input(&KeyboardReport {
+                            modifier: 0,
+                            reserved: 0,
+                            leds: 0,
+                            keycodes: [0, 0, 0, 0, 0, 0],
+                        })
+                        .ok();
+                    ms_hid
+                        .push_input(&MouseReport {
+                            buttons: 0,
+                            x: 0,
+                            y: 0,
+                            wheel: 0,
+                            pan: 0,
+                        })
+                        .ok();
                 } else {
-                    let report = build_report(mtx);
-                    hid.push_input(&report).ok();
+                    if mode_switch(&mtx) {
+                        let report = build_keyboard_report(mtx);
+                        kb_hid.push_input(&report).ok();
+                    } else {
+                        let report = build_mouse_report(mtx);
+                        ms_hid.push_input(&report).ok();
+                    }
                     last_input_frame = frame;
                 }
             } else if frame % (KEYBOARD_POLL_MS_SAVING / KEYBOARD_POLL_MS) == 0 {
                 let (mtx, empty) = scan_key_switch(cols, rows);
-                let report = build_report(mtx);
-                hid.push_input(&report).ok();
                 if empty {
-                    hid.push_input(&KeyboardReport {
-                        modifier: 0,
-                        reserved: 0,
-                        leds: 0,
-                        keycodes: [0, 0, 0, 0, 0, 0],
-                    })
-                    .ok();
+                    kb_hid
+                        .push_input(&KeyboardReport {
+                            modifier: 0,
+                            reserved: 0,
+                            leds: 0,
+                            keycodes: [0, 0, 0, 0, 0, 0],
+                        })
+                        .ok();
+                    ms_hid
+                        .push_input(&MouseReport {
+                            buttons: 0,
+                            x: 0,
+                            y: 0,
+                            wheel: 0,
+                            pan: 0,
+                        })
+                        .ok();
                 } else {
-                    let report = build_report(mtx);
-                    hid.push_input(&report).ok();
+                    if mode_switch(&mtx) {
+                        let report = build_keyboard_report(mtx);
+                        kb_hid.push_input(&report).ok();
+                    } else {
+                        let report = build_mouse_report(mtx);
+                        ms_hid.push_input(&report).ok();
+                    }
                     last_input_frame = frame;
                     keyboard_mode = KeyboardMode::Normal;
                 }
@@ -185,13 +226,18 @@ fn main() -> ! {
 
             frame = (frame + 1) % (1000 / KEYBOARD_POLL_MS * IDLE_WAIT_SEC);
         }
-        hid.pull_raw_output(&mut [0; 64]).ok();
+        kb_hid.pull_raw_output(&mut [0; 64]).ok();
         if keyboard_mode == KeyboardMode::Normal {
             led.set_high().unwrap();
         } else {
             led.set_low().unwrap();
         }
     }
+}
+
+fn mode_switch(state: &MatrixState) -> bool {
+    // true : keyboard, false : mouse
+    return !state[MODE_KEY_POS[0]][MODE_KEY_POS[1]];
 }
 
 fn scan_key_switch(cols: &[Column], rows: &mut [Row]) -> (MatrixState, bool) {
@@ -212,7 +258,7 @@ fn scan_key_switch(cols: &[Column], rows: &mut [Row]) -> (MatrixState, bool) {
     return (state, empty);
 }
 
-fn build_report(state: MatrixState) -> KeyboardReport {
+fn build_keyboard_report(state: MatrixState) -> KeyboardReport {
     let mut modif = 0;
     let mut key_codes: [u8; 6] = [0; 6];
     let mut count = 0;
@@ -279,4 +325,36 @@ fn build_report(state: MatrixState) -> KeyboardReport {
         leds: 0,
         keycodes: key_codes,
     }
+}
+
+fn build_mouse_report(state: MatrixState) -> MouseReport {
+    let mut report = MouseReport {
+        buttons: 0,
+        x: 0,
+        y: 0,
+        wheel: 0,
+        pan: 0,
+    };
+
+    if state[LEFT_BUTTON[0]][LEFT_BUTTON[1]] {
+        report.buttons |= 1 << 0;
+    }
+    if state[RIGHT_BUTTON[0]][RIGHT_BUTTON[1]] {
+        report.buttons |= 1 << 1;
+    }
+
+    if state[MOVE_LEFT[0]][MOVE_LEFT[1]] {
+        report.x -= 3;
+    }
+    if state[MOVE_RIGHT[0]][MOVE_RIGHT[1]] {
+        report.x += 3;
+    }
+    if state[MOVE_UP[0]][MOVE_UP[1]] {
+        report.y -= 3;
+    }
+    if state[MOVE_DOWN[0]][MOVE_DOWN[1]] {
+        report.y += 3;
+    }
+
+    return report;
 }

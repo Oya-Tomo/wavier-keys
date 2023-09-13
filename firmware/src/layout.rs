@@ -1,7 +1,9 @@
 use super::keycodes::KeyCodes::*;
 use crate::keycodes::KeyCodes;
 
-pub const FN_KEY_POS: [usize; 2] = [3, 14]; // row, col
+pub const MODE_KEY_POS: [usize; 2] = [3, 14]; // switch keyboard mode or mouse mode
+
+pub const FN_KEY_POS: [usize; 2] = [2, 14]; // row, col
 
 pub const LEFT_CTRL: [usize; 2] = [4, 0];
 pub const LEFT_SHIFT: [usize; 2] = [3, 0];
@@ -11,6 +13,13 @@ pub const RIGHT_CTRL: [usize; 2] = [4, 10];
 pub const RIGHT_SHIFT: [usize; 2] = [3, 11];
 pub const RIGHT_ALT: [usize; 2] = [4, 8];
 pub const RIGHT_GUI: [usize; 2] = [4, 9]; // unused in the layout
+
+pub const MOVE_LEFT: [usize; 2] = [2, 6];
+pub const MOVE_DOWN: [usize; 2] = [2, 7];
+pub const MOVE_UP: [usize; 2] = [2, 8];
+pub const MOVE_RIGHT: [usize; 2] = [2, 9];
+pub const LEFT_BUTTON: [usize; 2] = [2, 10];
+pub const RIGHT_BUTTON: [usize; 2] = [2, 11];
 
 pub const KEY_LAYOUT: [[KeyCodes; 15]; 5] = [
     [
@@ -23,7 +32,7 @@ pub const KEY_LAYOUT: [[KeyCodes; 15]; 5] = [
     ],
     [
         CapsLock, KeyA, KeyS, KeyD, KeyF, KeyG, KeyH, KeyJ, KeyK, KeyL, SemiColon, Apostrophe,
-        Reserved, Enter, Home,
+        Reserved, Enter, Reserved,
     ],
     [
         Reserved, KeyZ, KeyX, KeyC, KeyV, KeyB, KeyN, KeyM, Comma, Dot, Slash, Reserved, Reserved,
@@ -44,21 +53,8 @@ pub const KEY_LAYOUT_WITH_FN: [[KeyCodes; 15]; 5] = [
         BackSlash, Delete,
     ],
     [
-        CapsLock,
-        KeyA,
-        KeyS,
-        KeyD,
-        KeyF,
-        KeyG,
-        KeyH,
-        KeyJ,
-        KeyK,
-        KeyL,
-        SemiColon,
-        Apostrophe,
-        Reserved,
-        Enter,
-        PrintScreen,
+        CapsLock, KeyA, KeyS, KeyD, KeyF, KeyG, KeyH, KeyJ, KeyK, KeyL, SemiColon, Apostrophe,
+        Reserved, Enter, Reserved,
     ],
     [
         Reserved, KeyZ, KeyX, KeyC, KeyV, KeyB, KeyN, KeyM, Comma, Dot, Slash, Reserved, Reserved,
