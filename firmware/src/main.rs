@@ -54,7 +54,7 @@ enum KeyboardMode {
     Saving,
 }
 
-const KEYBOARD_POLL_MS: u32 = 5;
+const KEYBOARD_POLL_MS: u32 = 10;
 const KEYBOARD_POLL_MS_SAVING: u32 = 20;
 const IDLE_WAIT_SEC: u32 = 5;
 
@@ -161,37 +161,9 @@ fn main() -> ! {
                 keyboard_mode = KeyboardMode::Saving;
             }
 
-            if keyboard_mode == KeyboardMode::Normal {
-                let (mtx, empty) = scan_key_switch(cols, rows);
-                if empty {
-                    kb_hid
-                        .push_input(&KeyboardReport {
-                            modifier: 0,
-                            reserved: 0,
-                            leds: 0,
-                            keycodes: [0, 0, 0, 0, 0, 0],
-                        })
-                        .ok();
-                    ms_hid
-                        .push_input(&MouseReport {
-                            buttons: 0,
-                            x: 0,
-                            y: 0,
-                            wheel: 0,
-                            pan: 0,
-                        })
-                        .ok();
-                } else {
-                    if mode_switch(&mtx) {
-                        let report = build_keyboard_report(mtx);
-                        kb_hid.push_input(&report).ok();
-                    } else {
-                        let report = build_mouse_report(mtx);
-                        ms_hid.push_input(&report).ok();
-                    }
-                    last_input_frame = frame;
-                }
-            } else if frame % (KEYBOARD_POLL_MS_SAVING / KEYBOARD_POLL_MS) == 0 {
+            if keyboard_mode == KeyboardMode::Normal
+                || frame % (KEYBOARD_POLL_MS_SAVING / KEYBOARD_POLL_MS) == 0
+            {
                 let (mtx, empty) = scan_key_switch(cols, rows);
                 if empty {
                     kb_hid
@@ -222,6 +194,24 @@ fn main() -> ! {
                     last_input_frame = frame;
                     keyboard_mode = KeyboardMode::Normal;
                 }
+            } else {
+                kb_hid
+                    .push_input(&KeyboardReport {
+                        modifier: 0,
+                        reserved: 0,
+                        leds: 0,
+                        keycodes: [0, 0, 0, 0, 0, 0],
+                    })
+                    .ok();
+                ms_hid
+                    .push_input(&MouseReport {
+                        buttons: 0,
+                        x: 0,
+                        y: 0,
+                        wheel: 0,
+                        pan: 0,
+                    })
+                    .ok();
             }
 
             frame = (frame + 1) % (1000 / KEYBOARD_POLL_MS * IDLE_WAIT_SEC);
